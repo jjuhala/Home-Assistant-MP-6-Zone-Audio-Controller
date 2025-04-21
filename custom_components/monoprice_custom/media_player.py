@@ -11,7 +11,7 @@ from homeassistant.components.media_player import (
     MediaPlayerState,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PORT
+from homeassistant.const import CONF_PORT, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform, service
 from homeassistant.helpers.entity import DeviceInfo
@@ -19,7 +19,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import voluptuous as vol
 
 from .const import (
-    CONF_NAME,
     CONF_SOURCES,
     DOMAIN,
     FIRST_RUN,
@@ -97,7 +96,7 @@ async def async_setup_entry(
             zone_id = (i * 10) + j
             _LOGGER.info("Adding zone %d for port %s", zone_id, port)
             entities.append(
-                MonopriceZone(monoprice, sources, config_entry.entry_id, zone_id)
+                MonopriceZone(monoprice, sources, config_entry, zone_id)
             )
 
     # only call update before add if it's the first run so we can try to detect zones
