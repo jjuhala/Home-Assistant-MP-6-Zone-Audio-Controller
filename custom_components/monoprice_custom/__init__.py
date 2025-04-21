@@ -1,5 +1,6 @@
 """The Monoprice 6-Zone Amplifier integration."""
 import logging
+import asyncio # Add asyncio import
 
 from pymonoprice import get_monoprice
 from serial import SerialException
@@ -15,6 +16,7 @@ from .const import (
     FIRST_RUN,
     MONOPRICE_OBJECT,
     UNDO_UPDATE_LISTENER,
+    MONOPRICE_LOCK, # Add MONOPRICE_LOCK constant
 )
 
 PLATFORMS = [Platform.MEDIA_PLAYER, Platform.SENSOR, Platform.NUMBER]
@@ -42,10 +44,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     undo_listener = entry.add_update_listener(_update_listener)
 
+    # Add a lock for thread-safe operations on the monoprice object
+    lock = asyncio.Lock()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         MONOPRICE_OBJECT: monoprice,
         UNDO_UPDATE_LISTENER: undo_listener,
         FIRST_RUN: first_run,
+        MONOPRICE_LOCK: lock, # Store the lock
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
