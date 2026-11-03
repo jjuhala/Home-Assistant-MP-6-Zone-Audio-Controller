@@ -19,10 +19,10 @@ from homeassistant.helpers import config_validation as cv, entity_platform, serv
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .connection import async_monoprice_command
 from .const import (
     DOMAIN,
-    FIRST_RUN,
-    MONOPRICE_OBJECT
+    FIRST_RUN
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,16 +35,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Monoprice 6-zone amplifier platform."""
     port = config_entry.data[CONF_PORT]
-    monoprice = hass.data[DOMAIN][config_entry.entry_id][MONOPRICE_OBJECT]
 
     entities = []
     for i in range(1, 4):
         for j in range(1, 7):
             zone_id = (i * 10) + j
             _LOGGER.info("Adding number entities for zone %d for port %s", zone_id, port)
-            entities.append(MonopriceZone(monoprice, "Balance", config_entry, zone_id))
-            entities.append(MonopriceZone(monoprice, "Bass", config_entry, zone_id))
-            entities.append(MonopriceZone(monoprice, "Treble", config_entry, zone_id))
+            entities.append(MonopriceZone("Balance", config_entry, zone_id))
+            entities.append(MonopriceZone("Bass", config_entry, zone_id))
+            entities.append(MonopriceZone("Treble", config_entry, zone_id))
 
     # only call update before add if it's the first run so we can try to detect zones
     first_run = hass.data[DOMAIN][config_entry.entry_id][FIRST_RUN]
@@ -63,9 +62,9 @@ async def async_setup_entry(
 class MonopriceZone(NumberEntity):
     """Representation of a Monoprice amplifier zone."""
 
-    def __init__(self, monoprice, control_type, config_entry, zone_id):
+    def __init__(self, control_type, config_entry, zone_id):
         """Initialize new zone controls."""
-        self._monoprice = monoprice
+        self._config_entry = config_entry
         self._control_type = control_type
         self._zone_id = zone_id
         
@@ -96,19 +95,22 @@ class MonopriceZone(NumberEntity):
             
         self._update_success = True
         
-    def update(self):
+    async def async_update(self) -> None:
         """Retrieve latest value."""
         try:
-            state = self._monoprice.zone_status(self._zone_id)
+            state = await async_monoprice_command(
+                self.hass, self._config_entry, "zone_status", self._zone_id
+            )
         except SerialException:
             self._update_success = False
-            _LOGGER.warning("Could not update zone %d", self._zone_id)
+            self._attr_available = False
             return
 
         if not state:
             self._update_success = False
             return
 
+        self._attr_available = True
         if(self._control_type == "Balance"):
             self._attr_native_value = state.balance
         elif(self._control_type == "Bass"):
@@ -123,11 +125,14 @@ class MonopriceZone(NumberEntity):
             return False
         return self._zone_id < 20 or self._update_success
 
-    def set_native_value(self, value: float) -> None:
+    async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
         if(self._control_type == "Balance"):
-            self._monoprice.set_balance(self._zone_id, int(value))
+            command = "set_balance"
         elif(self._control_type == "Bass"):
-            self._monoprice.set_bass(self._zone_id, int(value))
+            command = "set_bass"
         elif(self._control_type == "Treble"):
-            self._monoprice.set_treble(self._zone_id, int(value))
+            command = "set_treble"
+        await async_monoprice_command(
+            self.hass, self._config_entry, command, self._zone_id, int(value)
+        )

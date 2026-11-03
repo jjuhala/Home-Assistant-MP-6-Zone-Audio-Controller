@@ -3,7 +3,6 @@ import logging
 import asyncio
 import functools
 
-from pymonoprice import get_monoprice
 from serial import SerialException
 
 from homeassistant import core
@@ -21,12 +20,11 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import voluptuous as vol
 
+from .connection import async_monoprice_command
 from .const import (
     CONF_SOURCES,
     DOMAIN,
     FIRST_RUN,
-    MONOPRICE_OBJECT,
-    MONOPRICE_LOCK,
     SERVICE_RESTORE,
     SERVICE_SNAPSHOT,
     SERVICE_SET_BALANCE,
@@ -90,7 +88,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Monoprice 6-zone amplifier platform."""
 
-    monoprice = hass.data[DOMAIN][config_entry.entry_id][MONOPRICE_OBJECT]
     sources = _get_sources(config_entry)
     port = config_entry.data[CONF_PORT]
 
@@ -100,7 +97,7 @@ async def async_setup_entry(
             zone_id = (i * 10) + j
             _LOGGER.info("Adding zone %d for port %s", zone_id, port)
             entities.append(
-                MonopriceZone(hass, monoprice, sources, config_entry, zone_id) # Pass hass
+                MonopriceZone(hass, sources, config_entry, zone_id) # Pass hass
             )
 
     # only call update before add if it's the first run so we can try to detect zones
@@ -198,10 +195,9 @@ class MonopriceZone(MediaPlayerEntity):
     _attr_sound_mode_list = ["Normal", "High Bass", "Medium Bass", "Low Bass"]
     _attr_sound_mode = None
 
-    def __init__(self, hass, monoprice, sources, config_entry, zone_id): # Add hass
+    def __init__(self, hass, sources, config_entry, zone_id): # Add hass
         """Initialize new zone."""
         self.hass = hass # Store hass
-        self._monoprice = monoprice
         self._config_entry = config_entry # Store config_entry
         # dict source_id -> source name
         self._source_id_name = sources[0]
@@ -224,56 +220,21 @@ class MonopriceZone(MediaPlayerEntity):
 
 
     async def _async_monoprice_command(self, method_name: str, *args):
-        """Execute a pymonoprice command with locking, reconnection and retry."""
-        lock = self.hass.data[DOMAIN][self._config_entry.entry_id][MONOPRICE_LOCK]
-        async with lock:
-            try:
-                # Get current monoprice object *inside* the lock
-                monoprice = self.hass.data[DOMAIN][self._config_entry.entry_id][MONOPRICE_OBJECT]
-                command_func = getattr(monoprice, method_name)
-                # Run synchronous pymonoprice command in executor
-                return await self.hass.async_add_executor_job(command_func, *args)
-            except SerialException as err:
-                _LOGGER.warning(
-                    "Command %s failed for zone %d: %s. Attempting reconnect.",
-                    method_name, self._zone_id, err
-                )
-                port = self._config_entry.data[CONF_PORT]
-                try:
-                    # Run synchronous get_monoprice in executor
-                    new_monoprice = await self.hass.async_add_executor_job(get_monoprice, port)
-                    # Update shared object *inside* the lock
-                    self.hass.data[DOMAIN][self._config_entry.entry_id][MONOPRICE_OBJECT] = new_monoprice
-                    self._monoprice = new_monoprice # Update local reference for convenience
-                    _LOGGER.info("Reconnected to Monoprice amplifier at %s successfully.", port)
-
-                    # Retry command with the new object
-                    _LOGGER.info("Retrying command: %s for zone %d", method_name, self._zone_id)
-                    command_func = getattr(new_monoprice, method_name)
-                    # Run synchronous pymonoprice command in executor
-                    return await self.hass.async_add_executor_job(command_func, *args)
-                except SerialException as retry_err:
-                    _LOGGER.error(
-                        "Failed to reconnect or command %s failed after reconnect for zone %d: %s",
-                        method_name, self._zone_id, retry_err
-                    )
-                    # Mark entity unavailable by raising the original error
-                    self._attr_available = False # Mark unavailable immediately
-                    raise err from retry_err # Re-raise original error to signal failure
-                except Exception as recon_ex:
-                    _LOGGER.error(
-                        "Unexpected error during reconnect attempt for zone %d: %s",
-                        self._zone_id, recon_ex, exc_info=True
-                    )
-                    self._attr_available = False # Mark unavailable immediately
-                    raise err from recon_ex # Re-raise original error
-            except Exception as general_err:
-                _LOGGER.error(
-                    "Unexpected error executing command %s for zone %d: %s",
-                    method_name, self._zone_id, general_err, exc_info=True
-                )
-                self._attr_available = False # Mark unavailable immediately
-                raise # Re-raise unexpected error
+        """Execute a pymonoprice command, marking the zone unavailable if it fails."""
+        try:
+            return await async_monoprice_command(
+                self.hass, self._config_entry, method_name, *args
+            )
+        except SerialException:
+            self._attr_available = False # Mark unavailable immediately
+            raise
+        except Exception as general_err:
+            _LOGGER.error(
+                "Unexpected error executing command %s for zone %d: %s",
+                method_name, self._zone_id, general_err, exc_info=True
+            )
+            self._attr_available = False # Mark unavailable immediately
+            raise # Re-raise unexpected error
 
 
     async def async_update(self) -> None:
