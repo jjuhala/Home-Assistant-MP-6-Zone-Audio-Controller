@@ -2,3 +2,4 @@
 4/24/22 - Fix balance range monoprice_custom.set_balance from 1-19 to 0-20
 4/24/22 - Disable zones 10, 20, 30 by default, there seems to be some issues with these zones. Enable with caution.
 11/3/26 - Fix sensor and number entities staying on a dead connection after a reconnect, which stopped their updates and flooded the log. All platforms now share one connection helper with a 30 s reconnect backoff.
+11/4/26 - Drop the hass argument from verify_domain_control, which Home Assistant removes in 2026.10. Now needs Home Assistant 2025.10 or newer.

@@ -107,7 +107,7 @@ async def async_setup_entry(
     platform = entity_platform.async_get_current_platform()
 
     # Rework service handling to be async
-    @service.verify_domain_control(hass, DOMAIN)
+    @service.verify_domain_control(DOMAIN)
     async def async_service_handle(service_call: core.ServiceCall) -> None:
         """Handle services to control Monoprice zones."""
         entities = await platform.async_extract_from_service(service_call)
